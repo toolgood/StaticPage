@@ -1,0 +1,23 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+
+<div class="text-center">
+    <h1 class="display-4">Welcome</h1>
+    <p>Learn about <a href="https://docs.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+</div>
+
+
+
+<div>
+    /Count <a href="/Count">普通打开</a>
+    第一次会加1，以后不会加1
+</div>
+<div>
+    /Count?__update__ <a href="/Count?__update__">更新打开</a>
+    会加1，会改变Etag
+</div>
+<div>
+    /Count?__test__  <a href="/Count?__test__">测试打开</a>
+    会加1，不会成生Etag
+</div>
