@@ -28,6 +28,10 @@ namespace Microsoft.AspNetCore.Mvc
         /// </summary>
         public static string TestQueryString = "__test__";
 
+        /// <summary>
+        /// 开发模式
+        /// </summary>
+        public static bool IsDevelopmentMode = false;
 
         /// <summary>
         /// 支持Url参数
@@ -60,7 +64,7 @@ namespace Microsoft.AspNetCore.Mvc
 
         public void OnPageHandlerExecuting(PageHandlerExecutingContext context)
         {
-            if (IsTest(context) == false && IsUpdateOutputFile(context) == false) {
+            if (IsDevelopmentMode==false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
                 var filePath = GetOutputFilePath(context);
                 var response = context.HttpContext.Response;
                 if (File.Exists(filePath)) {
@@ -93,16 +97,14 @@ namespace Microsoft.AspNetCore.Mvc
             }
         }
 
-        public void OnPageHandlerSelected(PageHandlerSelectedContext context)
-        {
-        }
+        public void OnPageHandlerSelected(PageHandlerSelectedContext context) { }
         #endregion
 
         #region 用于 Views
 
         public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            if (IsTest(context) == false && IsUpdateOutputFile(context) == false) {
+            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
                 var filePath = GetOutputFilePath(context);
                 var response = context.HttpContext.Response;
                 if (File.Exists(filePath)) {
@@ -139,13 +141,8 @@ namespace Microsoft.AspNetCore.Mvc
 
         public override async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)
         {
-            // 这是已处理的，不用保存
-            if (context.Result is StatusCodeResult || context.Result is FileContentResult) {
-                await base.OnResultExecutionAsync(context, next);
-                return;
-            }
-            // 测试 不用保存
-            if (IsTest(context)) {
+            // 开发模式，已处理的，测试，不用保存到本地目录
+            if (IsDevelopmentMode || context.Result is StatusCodeResult || context.Result is FileContentResult || IsTest(context)) {
                 await base.OnResultExecutionAsync(context, next);
                 return;
             }
