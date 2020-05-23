@@ -59,7 +59,25 @@ namespace Microsoft.AspNetCore.Mvc
         /// </summary>
         public static event Func<string, string> MiniFunc;
 
-
+        /// <summary>
+        /// 当前页面缓存时间，（单位：分钟），最小值：1
+        /// </summary>
+        private int? CurrPageExpireMinutes { get; set; }
+        /// <summary>
+        /// 生成Html静态文件
+        /// </summary>
+        public HtmlStaticFileAttribute() { }
+        /// <summary>
+        /// 生成Html静态文件
+        /// </summary>
+        /// <param name="expireMinutes">当前页面缓存时间（单位：分钟），最小值：1</param>
+        public HtmlStaticFileAttribute(int expireMinutes)
+        {
+            if (expireMinutes <= 0) {
+                expireMinutes = 1;
+            }
+            CurrPageExpireMinutes = expireMinutes;
+        }
 
         #region 用于 Pages
         public void OnPageHandlerExecuted(PageHandlerExecutedContext context) { }
@@ -67,34 +85,9 @@ namespace Microsoft.AspNetCore.Mvc
         public void OnPageHandlerExecuting(PageHandlerExecutingContext context)
         {
             if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
-                var filePath = GetOutputFilePath(context);
-                var response = context.HttpContext.Response;
-                if (File.Exists(filePath)) {
-                    var fi = new FileInfo(filePath);
-                    var etag = fi.LastWriteTimeUtc.Ticks.ToString();
-                    if (context.HttpContext.Request.Headers["If-None-Match"] == etag) {
-                        context.Result = new StatusCodeResult(304);
-                        return;
-                    }
-                    response.Headers["Cache-Control"] = "max-age=" + ExpireMinutes * 60;
-                    response.Headers["Etag"] = etag;
-                    response.Headers["Date"] = DateTime.Now.ToString("r");
-                    response.Headers["Expires"] = DateTime.Now.AddMinutes(ExpireMinutes).ToString("r");
-
-                    if (UseBrCompress || UseGzipCompress) {
-                        var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().Replace(" ", "").ToLower().Split(',');
-                        if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br")) {
-                            response.Headers["Content-Encoding"] = "br";
-                            context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".br"), "text/html");
-                            return;
-                        } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
-                            response.Headers["Content-Encoding"] = "gzip";
-                            context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".gzip"), "text/html");
-                            return;
-                        }
-                    }
-                    var bytes = File.ReadAllBytes(filePath);
-                    context.Result = new FileContentResult(bytes, "text/html");
+                var result = GetStaticFileResult(context);
+                if (result != null) {
+                    context.Result = result;
                     return;
                 }
             }
@@ -108,45 +101,57 @@ namespace Microsoft.AspNetCore.Mvc
         public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
             if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
-                var filePath = GetOutputFilePath(context);
-                var response = context.HttpContext.Response;
-                if (File.Exists(filePath)) {
-                    var fi = new FileInfo(filePath);
-                    var etag = fi.LastWriteTimeUtc.Ticks.ToString();
-                    if (context.HttpContext.Request.Headers["If-None-Match"] == etag) {
-                        context.Result = new StatusCodeResult(304);
-                        return;
-                    }
-                    response.Headers["Cache-Control"] = "max-age=" + ExpireMinutes * 60;
-                    response.Headers["Etag"] = etag;
-                    response.Headers["Date"] = DateTime.Now.ToString("r");
-                    response.Headers["Expires"] = DateTime.Now.AddMinutes(ExpireMinutes).ToString("r");
-
-                    if (UseBrCompress || UseGzipCompress) {
-                        var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().Replace(" ", "").ToLower().Split(',');
-                        if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br")) {
-                            response.Headers["Content-Encoding"] = "br";
-                            context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".br"), "text/html");
-                            return;
-                        } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
-                            response.Headers["Content-Encoding"] = "gzip";
-                            context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".gzip"), "text/html");
-                            return;
-                        }
-                    }
-                    var bytes = await File.ReadAllBytesAsync(filePath);
-                    context.Result = new FileContentResult(bytes, "text/html");
+                var result = GetStaticFileResult(context);
+                if (result != null) {
+                    context.Result = result;
                     return;
                 }
             }
             await base.OnActionExecutionAsync(context, next);
         }
+
         #endregion
+
+        /// <summary>
+        /// 尝试获取静态文件
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
+        private ActionResult GetStaticFileResult(FilterContext context)
+        {
+            var filePath = GetOutputFilePath(context);
+            var response = context.HttpContext.Response;
+            if (File.Exists(filePath)) {
+                var fi = new FileInfo(filePath);
+                var etag = fi.LastWriteTimeUtc.Ticks.ToString();
+                if (context.HttpContext.Request.Headers["If-None-Match"] == etag) {
+                    return new StatusCodeResult(304);
+                }
+                response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
+                response.Headers["Etag"] = etag;
+                response.Headers["Date"] = DateTime.Now.ToString("r");
+                response.Headers["Expires"] = DateTime.Now.AddMinutes(CurrPageExpireMinutes ?? ExpireMinutes).ToString("r");
+
+                if (UseBrCompress || UseGzipCompress) {
+                    var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().ToLower().Split(new char[] { ' ',','},StringSplitOptions.RemoveEmptyEntries);
+                    if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br")) {
+                        response.Headers["Content-Encoding"] = "br";
+                        return new PhysicalFileResult(filePath + ".br", "text/html");
+                    } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
+                        response.Headers["Content-Encoding"] = "gzip";
+                        return new PhysicalFileResult(filePath + ".gzip", "text/html");
+                    }
+                }
+                return new PhysicalFileResult(filePath, "text/html");
+            }
+            return null;
+        }
+
 
         public override async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)
         {
             // 开发模式，已处理的，测试，不用保存到本地目录
-            if (IsDevelopmentMode || context.Result is StatusCodeResult || context.Result is FileContentResult || IsTest(context)) {
+            if (IsDevelopmentMode || context.Result is StatusCodeResult || context.Result is FileResult || IsTest(context)) {
                 await base.OnResultExecutionAsync(context, next);
                 return;
             }
@@ -175,17 +180,24 @@ namespace Microsoft.AspNetCore.Mvc
                 }
                 response.Body.Position = old;
             }
-            {
+            //更新时，不添加页面缓存
+            if (IsUpdateOutputFile(context) == false) {
                 var fi = new FileInfo(filePath);
                 var etag = fi.LastWriteTimeUtc.Ticks.ToString();
-                context.HttpContext.Response.Headers["Cache-Control"] = "max-age=" + ExpireMinutes * 60;
+                context.HttpContext.Response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
                 context.HttpContext.Response.Headers["Etag"] = etag;
                 context.HttpContext.Response.Headers["Date"] = DateTime.Now.ToString("r");
-                context.HttpContext.Response.Headers["Expires"] = DateTime.Now.AddMinutes(ExpireMinutes).ToString("r");
+                context.HttpContext.Response.Headers["Expires"] = DateTime.Now.AddMinutes(CurrPageExpireMinutes ?? ExpireMinutes).ToString("r");
             }
         }
 
 
+        /// <summary>
+        /// 保存Html结束为静态文件
+        /// </summary>
+        /// <param name="stream"></param>
+        /// <param name="filePath"></param>
+        /// <returns></returns>
         private async Task SaveHtmlResult(Stream stream, string filePath)
         {
             stream.Position = 0;
@@ -211,17 +223,29 @@ namespace Microsoft.AspNetCore.Mvc
             }
         }
 
-
+        /// <summary>
+        /// 是否在测试
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
         private bool IsTest(FilterContext context)
         {
-            return context.HttpContext.Request.Query.Keys.Contains(TestQueryString);
+            return context.HttpContext.Request.Query.ContainsKey(TestQueryString);
         }
-
+        /// <summary>
+        /// 是否更新文件
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
         private bool IsUpdateOutputFile(FilterContext context)
         {
-            return context.HttpContext.Request.Query.Keys.Contains(UpdateFileQueryString);
+            return context.HttpContext.Request.Query.ContainsKey(UpdateFileQueryString);
         }
-
+        /// <summary>
+        /// 获取更新文件路径
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
         private string GetOutputFilePath(FilterContext context)
         {
             string dir = OutputFolder;
