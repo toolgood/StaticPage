@@ -133,9 +133,9 @@ Add the parameter "__update__" after the Url address, and you can generate a new
 
 ### 测试页面，不更新文件缓存 （Test page without updating file cache）
 
-在Url地址后面添加参数“__test__”，访问一下就可以生成新的静态页面。
+在Url地址后面添加参数“__test__”，访问一下就可以看到最新页面。
 
-Add the parameter "__test__" after the Url address, and you can generate a new static page after visiting it.
+Add the parameter "__test__" after the Url address, you can see the latest page after visiting.
 
 ```
     https://localhost:44304/Count?__test__
