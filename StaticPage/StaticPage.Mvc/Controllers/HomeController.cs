@@ -9,6 +9,7 @@ using StaticPage.Mvc.Models;
 
 namespace StaticPage.Mvc.Controllers
 {
+    [HtmlStaticFile]
     public class HomeController : Controller
     {
         private readonly ILogger<HomeController> _logger;

@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -15,10 +16,7 @@ namespace Microsoft.AspNetCore.Mvc
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
     public class HtmlStaticFileAttribute : ActionFilterAttribute, IPageFilter
     {
-        /// <summary>
-        /// 静态文件保存路径, 如果为空，则默认放在 {dll文件夹}\html 文件夹下
-        /// </summary>
-        public static string OutputFolder;
+
         /// <summary>
         /// 页面更新参数，用于更新页面,更新文件 如 https://localhost:44345/?__update__
         /// </summary>
@@ -34,7 +32,7 @@ namespace Microsoft.AspNetCore.Mvc
         public static bool IsDevelopmentMode = false;
 
         /// <summary>
-        /// 支持Url参数
+        /// 支持Url参数，不推荐使用
         /// </summary>
         public static bool UseQueryString = false;
         /// <summary>
@@ -43,7 +41,11 @@ namespace Microsoft.AspNetCore.Mvc
         public static int ExpireMinutes = 1;
 
         /// <summary>
-        /// 使用GZIP压缩，会另生成一个单独的文件，以空间换时间，火狐对于http://开头的地址不支持 br 压缩
+        /// 静态文件保存路径, 如果为空，则默认放在 {dll文件夹}\html 文件夹下
+        /// </summary>
+        public static string OutputFolder;
+        /// <summary>
+        /// 使用GZIP压缩，会另生成一个单独的文件，以空间换时间，火狐、IE11 对于http://开头的地址不支持 br 压缩
         /// </summary>
         public static bool UseGzipCompress = false;
 
@@ -55,7 +57,7 @@ namespace Microsoft.AspNetCore.Mvc
         /// <summary>
         /// 指定方法，保存前会进行最小化处理, 推荐使用 WebMarkupMin
         /// </summary>
-        public static Func<string, string> MiniFunc;
+        public static event Func<string, string> MiniFunc;
 
 
 
@@ -64,7 +66,7 @@ namespace Microsoft.AspNetCore.Mvc
 
         public void OnPageHandlerExecuting(PageHandlerExecutingContext context)
         {
-            if (IsDevelopmentMode==false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
+            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
                 var filePath = GetOutputFilePath(context);
                 var response = context.HttpContext.Response;
                 if (File.Exists(filePath)) {
@@ -88,6 +90,7 @@ namespace Microsoft.AspNetCore.Mvc
                         } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
                             response.Headers["Content-Encoding"] = "gzip";
                             context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".gzip"), "text/html");
+                            return;
                         }
                     }
                     var bytes = File.ReadAllBytes(filePath);
@@ -128,6 +131,7 @@ namespace Microsoft.AspNetCore.Mvc
                         } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
                             response.Headers["Content-Encoding"] = "gzip";
                             context.Result = new FileContentResult(File.ReadAllBytes(filePath + ".gzip"), "text/html");
+                            return;
                         }
                     }
                     var bytes = await File.ReadAllBytesAsync(filePath);
@@ -202,7 +206,7 @@ namespace Microsoft.AspNetCore.Mvc
                 }
                 if (UseBrCompress) {
                     var bs = BrCompress(bytes, false);
-                    await File.WriteAllBytesAsync(filePath + ".gzip", bs);
+                    await File.WriteAllBytesAsync(filePath + ".br", bs);
                 }
             }
         }
@@ -242,7 +246,7 @@ namespace Microsoft.AspNetCore.Mvc
                         }
                     }
                 }
-                t += string.Join(",", list);
+                t += Regex.Replace(string.Join(",", list), "[^0-9_a-zA-Z\u4E00-\u9FCB\u3400-\u4DB5\u3007]", "_");
             }
 
             t = t.TrimStart(Path.DirectorySeparatorChar);
