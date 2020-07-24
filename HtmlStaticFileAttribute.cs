@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -16,6 +17,21 @@ namespace Microsoft.AspNetCore.Mvc
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
     public class HtmlStaticFileAttribute : ActionFilterAttribute, IPageFilter
     {
+        private static ConcurrentDictionary<string, PageCache> MemoryCache = new ConcurrentDictionary<string, PageCache>();
+        private struct PageCache
+        {
+            public DateTime LastWriteTimeUtc;
+            public byte[] Html;
+            public byte[] GzipHtml;
+            public byte[] BrHtml;
+            public PageCache(DateTime dt, byte[] html, byte[] gzip, byte[] br)
+            {
+                LastWriteTimeUtc = dt;
+                Html = html;
+                GzipHtml = gzip;
+                BrHtml = br;
+            }
+        }
 
         /// <summary>
         /// 页面更新参数，用于更新页面,更新文件 如 https://localhost:44345/?__update__
@@ -63,17 +79,25 @@ namespace Microsoft.AspNetCore.Mvc
         /// 当前页面缓存时间，（单位：分钟），最小值：1
         /// </summary>
         private int? CurrPageExpireMinutes { get; set; }
+
+        /// <summary>
+        /// 使用内存缓存
+        /// </summary>
+        public bool UseMemoryCache { get; set; }
+
         /// <summary>
         /// 生成Html静态文件
         /// </summary>
         public HtmlStaticFileAttribute() { }
+
         /// <summary>
         /// 生成Html静态文件
         /// </summary>
         /// <param name="expireMinutes">当前页面缓存时间（单位：分钟），最小值：1</param>
         public HtmlStaticFileAttribute(int expireMinutes)
         {
-            if (expireMinutes <= 0) {
+            if (expireMinutes <= 0)
+            {
                 expireMinutes = 1;
             }
             CurrPageExpireMinutes = expireMinutes;
@@ -84,9 +108,11 @@ namespace Microsoft.AspNetCore.Mvc
 
         public void OnPageHandlerExecuting(PageHandlerExecutingContext context)
         {
-            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
+            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false)
+            {
                 var result = GetStaticFileResult(context);
-                if (result != null) {
+                if (result != null)
+                {
                     context.Result = result;
                     return;
                 }
@@ -100,9 +126,11 @@ namespace Microsoft.AspNetCore.Mvc
 
         public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false) {
+            if (IsDevelopmentMode == false && IsTest(context) == false && IsUpdateOutputFile(context) == false)
+            {
                 var result = GetStaticFileResult(context);
-                if (result != null) {
+                if (result != null)
+                {
                     context.Result = result;
                     return;
                 }
@@ -121,23 +149,62 @@ namespace Microsoft.AspNetCore.Mvc
         {
             var filePath = GetOutputFilePath(context);
             var response = context.HttpContext.Response;
-            if (File.Exists(filePath)) {
+            // 从内存获取文件
+            if (UseMemoryCache)
+            {
+                if (MemoryCache.TryGetValue(filePath, out PageCache page))
+                {
+                    var etag = page.LastWriteTimeUtc.Ticks.ToString();
+                    if (context.HttpContext.Request.Headers["If-None-Match"] == etag)
+                    {
+                        return new StatusCodeResult(304);
+                    }
+                    if (UseBrCompress || UseGzipCompress)
+                    {
+                        var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().ToLower().Split(new char[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br"))
+                        {
+                            response.Headers["Content-Encoding"] = "br";
+                            return new FileContentResult(page.BrHtml, "text/html");
+                        }
+                        else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip"))
+                        {
+                            response.Headers["Content-Encoding"] = "gzip";
+                            return new FileContentResult(page.GzipHtml, "text/html");
+                        }
+                    }
+                    return new FileContentResult(page.Html, "text/html");
+                }
+            }
+            if (File.Exists(filePath))
+            {
                 var fi = new FileInfo(filePath);
                 var etag = fi.LastWriteTimeUtc.Ticks.ToString();
-                if (context.HttpContext.Request.Headers["If-None-Match"] == etag) {
+                if (context.HttpContext.Request.Headers["If-None-Match"] == etag)
+                {
                     return new StatusCodeResult(304);
                 }
+                if (UseMemoryCache)
+                {
+                    var html = File.ReadAllText(filePath);
+                    SaveHtmlResultToMemoryCache(filePath, html);
+                }
+
                 response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
                 response.Headers["Etag"] = etag;
                 response.Headers["Date"] = DateTime.Now.ToString("r");
                 response.Headers["Expires"] = DateTime.Now.AddMinutes(CurrPageExpireMinutes ?? ExpireMinutes).ToString("r");
 
-                if (UseBrCompress || UseGzipCompress) {
-                    var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().ToLower().Split(new char[] { ' ',','},StringSplitOptions.RemoveEmptyEntries);
-                    if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br")) {
+                if (UseBrCompress || UseGzipCompress)
+                {
+                    var sp = context.HttpContext.Request.Headers["Accept-Encoding"].ToString().ToLower().Split(new char[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (UseBrCompress && sp.Contains("br") && File.Exists(filePath + ".br"))
+                    {
                         response.Headers["Content-Encoding"] = "br";
                         return new PhysicalFileResult(filePath + ".br", "text/html");
-                    } else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip")) {
+                    }
+                    else if (UseGzipCompress && sp.Contains("gzip") && File.Exists(filePath + ".gzip"))
+                    {
                         response.Headers["Content-Encoding"] = "gzip";
                         return new PhysicalFileResult(filePath + ".gzip", "text/html");
                     }
@@ -151,37 +218,45 @@ namespace Microsoft.AspNetCore.Mvc
         public override async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)
         {
             // 开发模式，已处理的，测试，不用保存到本地目录
-            if (IsDevelopmentMode || context.Result is StatusCodeResult || context.Result is FileResult || IsTest(context)) {
+            if (IsDevelopmentMode || context.Result is StatusCodeResult || context.Result is FileResult || IsTest(context))
+            {
                 await base.OnResultExecutionAsync(context, next);
                 return;
             }
 
             var filePath = GetOutputFilePath(context);
             var response = context.HttpContext.Response;
-            if (!response.Body.CanRead || !response.Body.CanSeek) {
-                using (var ms = new MemoryStream()) {
+            if (!response.Body.CanRead || !response.Body.CanSeek)
+            {
+                using (var ms = new MemoryStream())
+                {
                     var old = response.Body;
                     response.Body = ms;
 
                     await base.OnResultExecutionAsync(context, next);
 
-                    if (response.StatusCode == 200) {
+                    if (response.StatusCode == 200)
+                    {
                         await SaveHtmlResult(response.Body, filePath);
                     }
                     ms.Position = 0;
                     await ms.CopyToAsync(old);
                     response.Body = old;
                 }
-            } else {
+            }
+            else
+            {
                 await base.OnResultExecutionAsync(context, next);
                 var old = response.Body.Position;
-                if (response.StatusCode == 200) {
+                if (response.StatusCode == 200)
+                {
                     await SaveHtmlResult(response.Body, filePath);
                 }
                 response.Body.Position = old;
             }
             //更新时，不添加页面缓存
-            if (IsUpdateOutputFile(context) == false) {
+            if (IsUpdateOutputFile(context) == false)
+            {
                 var fi = new FileInfo(filePath);
                 var etag = fi.LastWriteTimeUtc.Ticks.ToString();
                 context.HttpContext.Response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
@@ -203,24 +278,59 @@ namespace Microsoft.AspNetCore.Mvc
             stream.Position = 0;
             var responseReader = new StreamReader(stream);
             var responseContent = await responseReader.ReadToEndAsync();
-            if (MiniFunc != null) {//进行最小化处理
+            if (MiniFunc != null)
+            {//进行最小化处理
                 responseContent = MiniFunc(responseContent);
             }
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
 
             await File.WriteAllTextAsync(filePath, responseContent);
 
-            if (UseGzipCompress || UseBrCompress) {
-                var bytes = Encoding.UTF8.GetBytes(responseContent);
-                if (UseGzipCompress) {
-                    var bs = GzipCompress(bytes, false);
-                    await File.WriteAllBytesAsync(filePath + ".gzip", bs);
+
+            if (UseGzipCompress || UseBrCompress || UseMemoryCache)
+            {
+                byte[] gzip = new byte[0];
+                byte[] br = new byte[0];
+
+                var htmlbs = Encoding.UTF8.GetBytes(responseContent);
+                if (UseGzipCompress)
+                {
+                    gzip = GzipCompress(htmlbs, false);
+                    await File.WriteAllBytesAsync(filePath + ".gzip", gzip);
                 }
-                if (UseBrCompress) {
-                    var bs = BrCompress(bytes, false);
-                    await File.WriteAllBytesAsync(filePath + ".br", bs);
+                if (UseBrCompress)
+                {
+                    br = BrCompress(htmlbs, false);
+                    await File.WriteAllBytesAsync(filePath + ".br", br);
+                }
+                if (UseMemoryCache)
+                {
+                    var pg = new PageCache(new FileInfo(filePath).LastWriteTimeUtc, htmlbs, gzip, br);
+                    MemoryCache[filePath] = pg;
                 }
             }
+        }
+
+        /// <summary>
+        /// 读取文件，保存到内存缓存内
+        /// </summary>
+        /// <param name="filePath"></param>
+        /// <param name="html"></param>
+        private void SaveHtmlResultToMemoryCache(string filePath, string html)
+        {
+            byte[] htmlbs = Encoding.UTF8.GetBytes(html);
+            byte[] gzip = new byte[0];
+            byte[] br = new byte[0];
+            if (UseGzipCompress)
+            {
+                gzip = GzipCompress(htmlbs, false);
+            }
+            if (UseBrCompress)
+            {
+                br = BrCompress(htmlbs, false);
+            }
+            var pg = new PageCache(new FileInfo(filePath).LastWriteTimeUtc, htmlbs, gzip, br);
+            MemoryCache[filePath] = pg;
         }
 
         /// <summary>
@@ -249,23 +359,31 @@ namespace Microsoft.AspNetCore.Mvc
         private string GetOutputFilePath(FilterContext context)
         {
             string dir = OutputFolder;
-            if (string.IsNullOrEmpty(dir)) {
+            if (string.IsNullOrEmpty(dir))
+            {
                 dir = Path.Combine(Path.GetDirectoryName(typeof(HtmlStaticFileAttribute).Assembly.Location), "html");
                 OutputFolder = dir;
             }
 
             var t = context.HttpContext.Request.Path.ToString().Replace("//", Path.DirectorySeparatorChar.ToString()).Replace("/", Path.DirectorySeparatorChar.ToString());
-            if (t.EndsWith(Path.DirectorySeparatorChar)) {
+            if (t.EndsWith(Path.DirectorySeparatorChar))
+            {
                 t += "index";
             }
-            if (UseQueryString) {
+            if (UseQueryString)
+            {
                 var list = new HashSet<string>();
-                foreach (var item in context.HttpContext.Request.Query.Keys) {
-                    if (item != UpdateFileQueryString) {
+                foreach (var item in context.HttpContext.Request.Query.Keys)
+                {
+                    if (item != UpdateFileQueryString)
+                    {
                         var value = context.HttpContext.Request.Query[item];
-                        if (string.IsNullOrEmpty(value)) {
+                        if (string.IsNullOrEmpty(value))
+                        {
                             list.Add($"{list}_");
-                        } else {
+                        }
+                        else
+                        {
                             list.Add($"{list}_{value}");
                         }
                     }
@@ -287,15 +405,20 @@ namespace Microsoft.AspNetCore.Mvc
         {
             if (data == null || data.Length == 0)
                 return data;
-            try {
-                using (MemoryStream stream = new MemoryStream()) {
+            try
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
                     var level = fastest ? CompressionLevel.Fastest : CompressionLevel.Optimal;
-                    using (GZipStream zStream = new GZipStream(stream, level)) {
+                    using (GZipStream zStream = new GZipStream(stream, level))
+                    {
                         zStream.Write(data, 0, data.Length);
                     }
                     return stream.ToArray();
                 }
-            } catch {
+            }
+            catch
+            {
                 return data;
             }
         }
@@ -310,15 +433,20 @@ namespace Microsoft.AspNetCore.Mvc
         {
             if (data == null || data.Length == 0)
                 return data;
-            try {
-                using (MemoryStream stream = new MemoryStream()) {
+            try
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
                     var level = fastest ? CompressionLevel.Fastest : CompressionLevel.Optimal;
-                    using (BrotliStream zStream = new BrotliStream(stream, level)) {
+                    using (BrotliStream zStream = new BrotliStream(stream, level))
+                    {
                         zStream.Write(data, 0, data.Length);
                     }
                     return stream.ToArray();
                 }
-            } catch {
+            }
+            catch
+            {
                 return data;
             }
         }
