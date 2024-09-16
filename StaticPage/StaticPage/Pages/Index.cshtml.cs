@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace StaticPage.Pages
 {
+    [HtmlStaticFile]
     public class IndexModel : PageModel
     {
         private readonly ILogger<IndexModel> _logger;

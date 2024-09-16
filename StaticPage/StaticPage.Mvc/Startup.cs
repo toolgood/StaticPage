@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -47,21 +47,21 @@ namespace StaticPage.Mvc
             app.UseAuthorization();
 
 
-            // ×¢Òâ ÇëÏÈÇåÒ»ÏÂä¯ÀÀÆ÷»º´æ
-            //¿ª·¢Ä£Ê½ 
+            // æ³¨æ„ è¯·å…ˆæ¸…ä¸€ä¸‹æµè§ˆå™¨ç¼“å­˜
+            //å¼€å‘æ¨¡å¼ 
             //HtmlStaticFileAttribute.IsDevelopmentMode = true;
 
-            //ÉèÖÃ»º´æÎÄ¼þ¼Ð
+            //è®¾ç½®ç¼“å­˜æ–‡ä»¶å¤¹
             HtmlStaticFileAttribute.OutputFolder = @"D:\html";
 
-            //Ê¹ÓÃÑ¹Ëõ
+            //ä½¿ç”¨åŽ‹ç¼©
             HtmlStaticFileAttribute.UseBrCompress = true;
             HtmlStaticFileAttribute.UseGzipCompress = true;
 
-            //ÉèÖÃÒ³Ãæ»º´æÊ±¼ä 3·ÖÖÓ
+            //è®¾ç½®é¡µé¢ç¼“å­˜æ—¶é—´ 3åˆ†é’Ÿ
             HtmlStaticFileAttribute.ExpireMinutes = 3;
 
-            // ¿ªÆôhtmlÑ¹Ëõ
+            // å¼€å¯htmlåŽ‹ç¼©
             HtmlStaticFileAttribute.MiniFunc += (string html) => {
                 var js = new NUglifyJsMinifier();
                 var css = new NUglifyCssMinifier();
