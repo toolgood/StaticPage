@@ -1,13 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using Microsoft.AspNetCore.Mvc.Filters;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Microsoft.AspNetCore.Mvc
 {
@@ -232,12 +232,14 @@ namespace Microsoft.AspNetCore.Mvc
             }
             //更新时，不添加页面缓存
             if (IsUpdateOutputFile(context) == false) {
-                var fi = new FileInfo(filePath);
-                var etag = fi.LastWriteTimeUtc.Ticks.ToString();
-                context.HttpContext.Response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
-                context.HttpContext.Response.Headers["Etag"] = etag;
-                context.HttpContext.Response.Headers["Date"] = DateTime.Now.ToString("r");
-                context.HttpContext.Response.Headers["Expires"] = DateTime.Now.AddMinutes(CurrPageExpireMinutes ?? ExpireMinutes).ToString("r");
+                if (context.HttpContext.Response.Headers.IsReadOnly == false) {
+                    var fi = new FileInfo(filePath);
+                    var etag = fi.LastWriteTimeUtc.Ticks.ToString();
+                    context.HttpContext.Response.Headers["Cache-Control"] = "max-age=" + (CurrPageExpireMinutes ?? ExpireMinutes) * 60;
+                    context.HttpContext.Response.Headers["Etag"] = etag;
+                    context.HttpContext.Response.Headers["Date"] = DateTime.Now.ToString("r");
+                    context.HttpContext.Response.Headers["Expires"] = DateTime.Now.AddMinutes(CurrPageExpireMinutes ?? ExpireMinutes).ToString("r");
+                }
             }
         }
 
